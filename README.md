@@ -102,3 +102,14 @@ sudo ufw allow from 192.168.1.0/24 to any port 8080 proto tcp
 Ajusta a sub-rede real, e assegura que o servidor e os clientes se conseguem alcançar. Não configures port-forwarding no router nem exponhas a porta 8080 à Internet. Esta versão usa HTTP, por isso passwords e dados podem ser observados numa rede não confiável: para ambientes empresariais, coloca-a atrás de reverse proxy HTTPS e ativa `HACCP_SECURE_COOKIE=true`. O modo LAN é destinado a uma rede local confiável e não equivale a estar pronto para produção.
 
 Variáveis: `HACCP_BIND` (predefinido `0.0.0.0`), `HACCP_PORT` (8080), `HACCP_SECURE_COOKIE` (false em HTTP local). Não é necessário ambiente gráfico, Node.js ou navegador no servidor.
+
+
+## Novo modelo: manutenção a quente
+
+O módulo **Manutenção a quente** permite registar alimento, equipamento/banho-maria, temperatura medida, temperatura mínima aprovada, ação corretiva e iniciais. Registos abaixo do mínimo exigem descrição da ação corretiva. Data e hora são atribuídas pelo servidor.
+
+No módulo, seleciona o mês e clica **Modelo original ↓**. O endpoint `/api/export-hot-holding?month=AAAA-MM&establishment=...&equipment=...` utiliza o ficheiro original `templates/hot-holding-log.xlsx` e preenche as células A8:G38 mantendo o restante ficheiro. O ficheiro tem capacidade para 31 leituras por exportação; se houver mais, responde com erro e não omite leituras silenciosamente. Este modelo destina-se a registos de conservação/manutenção a quente, não a frigoríficos.
+
+O livro IFC 2023 está guardado em `templates/haccp-work-book-template-ifc-2023.xlsx` como material de referência, **não** está ainda automaticamente preenchido. A aplicação não inventa medições nem valida automaticamente requisitos regulamentares. O mínimo é definido pelo responsável HACCP.
+
+Antes de atualizar: copia `data/store.bin` para backup e interrompe o serviço. A pasta `out` tem de permitir escrita pelo utilizador do serviço.

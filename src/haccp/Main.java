@@ -16,7 +16,7 @@ import javax.crypto.spec.PBEKeySpec;
 
 /** HACCP Auto: executable Java 21 web server (no third-party runtime dependencies). */
 public class Main {
- static final String[] TYPES={"equipment","temperatures","task_plans","task_records","suppliers","deliveries","nonconformities","maintenance","pest_checks","training","users","audit"};
+ static final String[] TYPES={"equipment","temperatures","hot_holding","task_plans","task_records","suppliers","deliveries","nonconformities","maintenance","pest_checks","training","users","audit"};
  static final Map<String,String[]> FIELDS = new LinkedHashMap<>();
  static final Set<String> ADMIN_ONLY=Set.of("equipment","task_plans","suppliers","maintenance","training","users");
  static final SecureRandom RANDOM=new SecureRandom();
@@ -27,6 +27,7 @@ public class Main {
  static {
   FIELDS.put("equipment",new String[]{"name","area","min_c","max_c","notes"});
   FIELDS.put("temperatures",new String[]{"equipment_id","temperature_c","measured_at","notes"});
+  FIELDS.put("hot_holding",new String[]{"food","equipment","temperature_c","minimum_c","corrective_action","initials","measured_at"});
   FIELDS.put("task_plans",new String[]{"title","area","frequency_days","instructions"});
   FIELDS.put("task_records",new String[]{"plan_id","completed_at","notes"});
   FIELDS.put("suppliers",new String[]{"name","contact","notes"});
@@ -41,6 +42,7 @@ public class Main {
   dataDir=Paths.get(System.getenv().getOrDefault("HACCP_DATA","data")).toAbsolutePath(); Files.createDirectories(dataDir);
   webDir=Paths.get(System.getenv().getOrDefault("HACCP_WEB","web")).toAbsolutePath();
   store=load();
+  for(String type:TYPES)store.rows.computeIfAbsent(type,k->new ArrayList<>());
   String bootstrap=System.getenv("HACCP_ADMIN_PASSWORD");
   synchronized(Main.class){if(store.rows.get("users").isEmpty()){
    if(bootstrap==null||bootstrap.length()<12) throw new IllegalStateException("Primeiro arranque: defina HACCP_ADMIN_PASSWORD com pelo menos 12 caracteres.");
@@ -89,6 +91,7 @@ public class Main {
    synchronized(Main.class){if(typ.equals("users")){if(!role(s).equals("admin")){json(x,403,err("Apenas administradores"));return;}if(user(row.get("username"))!=null)throw new IllegalArgumentException("Utilizador já existe");row.put("password_hash",hash(row.remove("password")));}if(typ.equals("temperatures")){Map<String,String> e=byId("equipment",row.get("equipment_id"));double val=Double.parseDouble(row.get("temperature_c"));double min=Double.parseDouble(e.get("min_c")),max=Double.parseDouble(e.get("max_c"));row.put("status",val<min||val>max?"alert":"ok");}store.rows.get(typ).add(row);audit(s.username,"CREATE",typ,row.get("id"),typ.equals("users")?row.get("username"):jsonStr(row));save();}
    json(x,201,Map.of("ok",true,"id",row.get("id"),"status",row.getOrDefault("status","saved")));return;}
   if(path.equals("/api/resolve")&&method.equals("POST")){if(!isManager(s)){json(x,403,err("Sem permissões"));return;}Map<String,String> f=form(x);String iid=f.getOrDefault("id","");String action=f.getOrDefault("action","").trim();if(action.length()<8)throw new IllegalArgumentException("Indique uma ação corretiva detalhada (mín. 8 caracteres)");synchronized(Main.class){Map<String,String> original=byId("nonconformities",iid);if(original==null)throw new IllegalArgumentException("Ocorrência inexistente");if("closed".equals(original.get("status")))throw new IllegalArgumentException("Ocorrência já fechada");original.put("status","closed");original.put("corrective_action",action);original.put("resolved_at",now());original.put("resolved_by",s.username);audit(s.username,"RESOLVE","nonconformities",iid,action);save();}json(x,200,Map.of("ok",true));return;}
+  if(path.equals("/api/export-hot-holding")&&method.equals("GET")){Map<String,String> q=query(x.getRequestURI().getRawQuery()==null?"":x.getRequestURI().getRawQuery());YearMonth month=YearMonth.parse(q.getOrDefault("month",YearMonth.now().toString()));List<Map<String,String>> rows=new ArrayList<>();synchronized(Main.class){for(var r:store.rows.get("hot_holding"))if(r.getOrDefault("measured_at",r.getOrDefault("created_at","")).startsWith(month.toString()))rows.add(new LinkedHashMap<>(r));}rows.sort(Comparator.comparing(r->r.getOrDefault("measured_at","")));if(rows.size()>31){json(x,409,err("O modelo só suporta 31 registos por ficheiro. Escolhe um período mais curto ou utiliza a exportação genérica."));return;}byte[] file=HotHoldingTemplate.generate(Paths.get("templates/hot-holding-log.xlsx"),month,q.getOrDefault("establishment",""),q.getOrDefault("equipment",""),rows);x.getResponseHeaders().set("Content-Disposition","attachment; filename=HACCP_Manutencao_Quente_"+month+".xlsx");send(x,200,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",file);return;}
   if(path.equals("/api/export")&&method.equals("GET")){Map<String,String> q=query(x.getRequestURI().getRawQuery()==null?"":x.getRequestURI().getRawQuery());String typ=q.getOrDefault("type","temperatures");String fmt=q.getOrDefault("format","xlsx");String month=q.getOrDefault("month",YearMonth.now().toString());if(!FIELDS.containsKey(typ)||typ.equals("users")){json(x,400,err("Tipo inválido"));return;}YearMonth ym=YearMonth.parse(month);List<Map<String,String>> rows=new ArrayList<>();synchronized(Main.class){for(var r:store.rows.get(typ)){String at=r.getOrDefault("created_at","");if(at.startsWith(month))rows.add(new LinkedHashMap<>(r));}}String[] cols=FIELDS.get(typ);byte[] bytes;String mime,ext;if(fmt.equals("pdf")){bytes=Pdf.make("HACCP | "+typ+" | "+month,cols,rows);mime="application/pdf";ext="pdf";}else if(fmt.equals("xlsx")){bytes=Xlsx.make(typ,cols,rows);mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";ext="xlsx";}else{json(x,400,err("Formato inválido"));return;}x.getResponseHeaders().set("Content-Disposition","attachment; filename=HACCP_"+typ+"_"+month+"."+ext);send(x,200,mime,bytes);return;}
   json(x,404,err("Endpoint não encontrado"));
  }
